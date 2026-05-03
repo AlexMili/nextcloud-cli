@@ -1,8 +1,4 @@
-"""Contacts (CardDAV) operations.
-
-Address books are listed via PROPFIND. Cards are fetched via REPORT and
-parsed with vobject for stable field access.
-"""
+"""Contacts (CardDAV) operations."""
 
 from __future__ import annotations
 
@@ -14,7 +10,13 @@ import vobject
 
 from nextcloud_cli.client import http_client
 from nextcloud_cli.config import Config, load
-from nextcloud_cli.utils import CONTEXT_SETTINGS, emit, fail, verbose_option
+from nextcloud_cli.rendering import (
+    render_addressbooks,
+    render_contact,
+    render_contacts,
+    render_status,
+)
+from nextcloud_cli.utils import CONTEXT_SETTINGS, fail, json_option, spinner, verbose_option
 
 CARDDAV_NS = {"d": "DAV:", "card": "urn:ietf:params:xml:ns:carddav"}
 
@@ -57,17 +59,19 @@ def _vcard_to_dict(card: "vobject.base.Component") -> dict:
 
 
 @verbose_option
+@json_option
 @contacts.command("list")
-def list_addressbooks() -> None:
+def list_addressbooks(json_output: bool) -> None:
     """List address books."""
     cfg = load()
-    with http_client(cfg, accept="application/xml") as http:
-        response = http.request(
-            "PROPFIND",
-            cfg.carddav_principal,
-            content=PROPFIND_ADDRESSBOOKS,
-            headers={"Depth": "1", "Content-Type": "application/xml"},
-        )
+    with spinner("Fetching address books", json_output):
+        with http_client(cfg, accept="application/xml") as http:
+            response = http.request(
+                "PROPFIND",
+                cfg.carddav_principal,
+                content=PROPFIND_ADDRESSBOOKS,
+                headers={"Depth": "1", "Content-Type": "application/xml"},
+            )
     if response.status_code >= 400:
         fail(f"PROPFIND failed: {response.status_code}")
 
@@ -80,22 +84,24 @@ def list_addressbooks() -> None:
         display = resp.findtext(".//d:displayname", "", CARDDAV_NS)
         if display:
             books.append({"name": Path(href.rstrip("/")).name, "displayname": display, "href": href})
-    emit(books)
+    render_addressbooks(books, json_output)
 
 
 @verbose_option
+@json_option
 @contacts.command()
 @click.option("--addressbook", required=True)
-def cards(addressbook: str) -> None:
+def cards(addressbook: str, json_output: bool) -> None:
     """List contacts in an address book."""
     cfg = load()
-    with http_client(cfg, accept="application/xml") as http:
-        response = http.request(
-            "REPORT",
-            _abook_url(cfg, addressbook),
-            content=REPORT_ADDRESSBOOK_QUERY,
-            headers={"Depth": "1", "Content-Type": "application/xml"},
-        )
+    with spinner(f"Fetching contacts from {addressbook}", json_output):
+        with http_client(cfg, accept="application/xml") as http:
+            response = http.request(
+                "REPORT",
+                _abook_url(cfg, addressbook),
+                content=REPORT_ADDRESSBOOK_QUERY,
+                headers={"Depth": "1", "Content-Type": "application/xml"},
+            )
     if response.status_code >= 400:
         fail(f"REPORT failed: {response.status_code}")
 
@@ -113,23 +119,25 @@ def cards(addressbook: str) -> None:
         item = _vcard_to_dict(card)
         item["href"] = href
         out.append(item)
-    emit(out)
+    render_contacts(out, json_output)
 
 
 @verbose_option
+@json_option
 @contacts.command()
 @click.option("--addressbook", required=True)
 @click.option("--uid", required=True)
-def get(addressbook: str, uid: str) -> None:
+def get(addressbook: str, uid: str, json_output: bool) -> None:
     """Fetch a single contact by UID."""
     cfg = load()
-    with http_client(cfg, accept="application/xml") as http:
-        response = http.request(
-            "REPORT",
-            _abook_url(cfg, addressbook),
-            content=REPORT_ADDRESSBOOK_QUERY,
-            headers={"Depth": "1", "Content-Type": "application/xml"},
-        )
+    with spinner(f"Fetching contact {uid}", json_output):
+        with http_client(cfg, accept="application/xml") as http:
+            response = http.request(
+                "REPORT",
+                _abook_url(cfg, addressbook),
+                content=REPORT_ADDRESSBOOK_QUERY,
+                headers={"Depth": "1", "Content-Type": "application/xml"},
+            )
     if response.status_code >= 400:
         fail(f"REPORT failed: {response.status_code}")
 
@@ -143,26 +151,28 @@ def get(addressbook: str, uid: str) -> None:
         except Exception:
             continue
         if hasattr(card, "uid") and card.uid.value == uid:
-            emit(_vcard_to_dict(card))
+            render_contact(_vcard_to_dict(card), json_output)
             return
     fail(f"contact not found: {uid}")
 
 
 @verbose_option
+@json_option
 @contacts.command()
 @click.option("--addressbook", required=True)
 @click.option("--uid", required=True)
 @click.option("--local", "local", required=True, type=click.Path(dir_okay=False))
-def export(addressbook: str, uid: str, local: str) -> None:
+def export(addressbook: str, uid: str, local: str, json_output: bool) -> None:
     """Export a contact as a vCard file."""
     cfg = load()
-    with http_client(cfg, accept="application/xml") as http:
-        response = http.request(
-            "REPORT",
-            _abook_url(cfg, addressbook),
-            content=REPORT_ADDRESSBOOK_QUERY,
-            headers={"Depth": "1", "Content-Type": "application/xml"},
-        )
+    with spinner(f"Exporting contact {uid}", json_output):
+        with http_client(cfg, accept="application/xml") as http:
+            response = http.request(
+                "REPORT",
+                _abook_url(cfg, addressbook),
+                content=REPORT_ADDRESSBOOK_QUERY,
+                headers={"Depth": "1", "Content-Type": "application/xml"},
+            )
     if response.status_code >= 400:
         fail(f"REPORT failed: {response.status_code}")
 
@@ -177,6 +187,6 @@ def export(addressbook: str, uid: str, local: str) -> None:
             continue
         if hasattr(card, "uid") and card.uid.value == uid:
             Path(local).write_text(card.serialize())
-            emit({"status": "exported", "uid": uid, "path": local})
+            render_status("exported", json_output, uid=uid, path=local)
             return
     fail(f"contact not found: {uid}")

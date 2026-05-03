@@ -11,7 +11,15 @@ from icalendar import Todo
 
 from nextcloud_cli.client import caldav_principal
 from nextcloud_cli.config import load
-from nextcloud_cli.utils import CONTEXT_SETTINGS, emit, fail, parse_datetime, verbose_option
+from nextcloud_cli.rendering import render_status, render_tasks
+from nextcloud_cli.utils import (
+    CONTEXT_SETTINGS,
+    fail,
+    json_option,
+    parse_datetime,
+    spinner,
+    verbose_option,
+)
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
@@ -40,32 +48,35 @@ def _find_task_list(principal, name: str | None):
 
 
 @verbose_option
+@json_option
 @tasks.command("list")
 @click.option("--list", "list_name", default=None, help="Specific task list name.")
 @click.option("--include-completed", is_flag=True)
-def list_(list_name: str | None, include_completed: bool) -> None:
+def list_(list_name: str | None, include_completed: bool, json_output: bool) -> None:
     """List tasks."""
     cfg = load()
-    out = []
-    with caldav_principal(cfg) as principal:
-        cal = _find_task_list(principal, list_name)
-        for todo in cal.todos(include_completed=include_completed):
-            ical = ICal.from_ical(todo.data)
-            for component in ical.walk("VTODO"):
-                out.append(
-                    {
-                        "uid": str(component.get("UID")),
-                        "summary": str(component.get("SUMMARY", "")),
-                        "due": component.decoded("DUE").isoformat() if component.get("DUE") else None,
-                        "status": str(component.get("STATUS", "")),
-                        "priority": int(component.get("PRIORITY", 0)) or None,
-                        "list": cal.name,
-                    }
-                )
-    emit(out)
+    out: list[dict] = []
+    with spinner("Fetching tasks", json_output):
+        with caldav_principal(cfg) as principal:
+            cal = _find_task_list(principal, list_name)
+            for todo in cal.todos(include_completed=include_completed):
+                ical = ICal.from_ical(todo.data)
+                for component in ical.walk("VTODO"):
+                    out.append(
+                        {
+                            "uid": str(component.get("UID")),
+                            "summary": str(component.get("SUMMARY", "")),
+                            "due": component.decoded("DUE").isoformat() if component.get("DUE") else None,
+                            "status": str(component.get("STATUS", "")),
+                            "priority": int(component.get("PRIORITY", 0)) or None,
+                            "list": cal.name,
+                        }
+                    )
+    render_tasks(out, json_output)
 
 
 @verbose_option
+@json_option
 @tasks.command()
 @click.option("--list", "list_name", default=None)
 @click.option("--summary", required=True)
@@ -78,6 +89,7 @@ def create(
     due: str | None,
     priority: int | None,
     description: str,
+    json_output: bool,
 ) -> None:
     """Create a new task."""
     cfg = load()
@@ -97,36 +109,40 @@ def create(
         todo.add("description", description)
     ical.add_component(todo)
 
-    with caldav_principal(cfg) as principal:
-        cal = _find_task_list(principal, list_name)
-        cal.save_todo(ical.to_ical().decode())
-    emit({"status": "created", "uid": uid})
+    with spinner(f"Creating task '{summary}'", json_output):
+        with caldav_principal(cfg) as principal:
+            cal = _find_task_list(principal, list_name)
+            cal.save_todo(ical.to_ical().decode())
+    render_status("task created", json_output, uid=uid, summary=summary)
 
 
 @verbose_option
+@json_option
 @tasks.command()
 @click.option("--list", "list_name", default=None)
 @click.option("--uid", required=True)
-def complete(list_name: str | None, uid: str) -> None:
+def complete(list_name: str | None, uid: str, json_output: bool) -> None:
     """Mark a task as completed."""
     cfg = load()
-    with caldav_principal(cfg) as principal:
-        cal = _find_task_list(principal, list_name)
-        try:
-            todo = cal.todo_by_uid(uid)
-        except Exception:
-            fail(f"task not found: {uid}")
-        ical = ICal.from_ical(todo.data)
-        for component in ical.walk("VTODO"):
-            component["STATUS"] = "COMPLETED"
-            component["COMPLETED"] = datetime.utcnow()
-            component["PERCENT-COMPLETE"] = 100
-        todo.data = ical.to_ical().decode()
-        todo.save()
-    emit({"status": "completed", "uid": uid})
+    with spinner(f"Completing task {uid}", json_output):
+        with caldav_principal(cfg) as principal:
+            cal = _find_task_list(principal, list_name)
+            try:
+                todo = cal.todo_by_uid(uid)
+            except Exception:
+                fail(f"task not found: {uid}")
+            ical = ICal.from_ical(todo.data)
+            for component in ical.walk("VTODO"):
+                component["STATUS"] = "COMPLETED"
+                component["COMPLETED"] = datetime.utcnow()
+                component["PERCENT-COMPLETE"] = 100
+            todo.data = ical.to_ical().decode()
+            todo.save()
+    render_status("task completed", json_output, uid=uid)
 
 
 @verbose_option
+@json_option
 @tasks.command()
 @click.option("--list", "list_name", default=None)
 @click.option("--uid", required=True)
@@ -141,45 +157,49 @@ def edit(
     due: str | None,
     priority: int | None,
     description: str | None,
+    json_output: bool,
 ) -> None:
     """Update fields of an existing task."""
     cfg = load()
-    with caldav_principal(cfg) as principal:
-        cal = _find_task_list(principal, list_name)
-        try:
-            todo = cal.todo_by_uid(uid)
-        except Exception:
-            fail(f"task not found: {uid}")
-        ical = ICal.from_ical(todo.data)
-        for component in ical.walk("VTODO"):
-            if summary is not None:
-                component["SUMMARY"] = summary
-            if due is not None:
-                if "DUE" in component:
-                    component["DUE"].dt = parse_datetime(due, cfg.timezone)
-                else:
-                    component.add("due", parse_datetime(due, cfg.timezone))
-            if priority is not None:
-                component["PRIORITY"] = priority
-            if description is not None:
-                component["DESCRIPTION"] = description
-        todo.data = ical.to_ical().decode()
-        todo.save()
-    emit({"status": "updated", "uid": uid})
+    with spinner(f"Updating task {uid}", json_output):
+        with caldav_principal(cfg) as principal:
+            cal = _find_task_list(principal, list_name)
+            try:
+                todo = cal.todo_by_uid(uid)
+            except Exception:
+                fail(f"task not found: {uid}")
+            ical = ICal.from_ical(todo.data)
+            for component in ical.walk("VTODO"):
+                if summary is not None:
+                    component["SUMMARY"] = summary
+                if due is not None:
+                    if "DUE" in component:
+                        component["DUE"].dt = parse_datetime(due, cfg.timezone)
+                    else:
+                        component.add("due", parse_datetime(due, cfg.timezone))
+                if priority is not None:
+                    component["PRIORITY"] = priority
+                if description is not None:
+                    component["DESCRIPTION"] = description
+            todo.data = ical.to_ical().decode()
+            todo.save()
+    render_status("task updated", json_output, uid=uid)
 
 
 @verbose_option
+@json_option
 @tasks.command()
 @click.option("--list", "list_name", default=None)
 @click.option("--uid", required=True)
-def delete(list_name: str | None, uid: str) -> None:
+def delete(list_name: str | None, uid: str, json_output: bool) -> None:
     """Delete a task."""
     cfg = load()
-    with caldav_principal(cfg) as principal:
-        cal = _find_task_list(principal, list_name)
-        try:
-            todo = cal.todo_by_uid(uid)
-        except Exception:
-            fail(f"task not found: {uid}")
-        todo.delete()
-    emit({"status": "deleted", "uid": uid})
+    with spinner(f"Deleting task {uid}", json_output):
+        with caldav_principal(cfg) as principal:
+            cal = _find_task_list(principal, list_name)
+            try:
+                todo = cal.todo_by_uid(uid)
+            except Exception:
+                fail(f"task not found: {uid}")
+            todo.delete()
+    render_status("deleted", json_output, uid=uid)
