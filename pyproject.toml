@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nextcloud-cli"
+version = "0.1.0"
+description = "Modern command-line client for Nextcloud (files, notes, calendar, tasks, contacts)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "AlexMili" }]
+keywords = ["nextcloud", "webdav", "caldav", "carddav", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: File Sharing",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "click>=8.1",
+    "httpx>=0.27",
+    "webdav4>=0.10",
+    "caldav>=1.3",
+    "icalendar>=5.0",
+    "vobject>=0.9.7",
+    "keyring>=24.0",
+    "python-dateutil>=2.8",
+    "tzlocal>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.10",
+    "ruff>=0.4",
+    "mypy>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/AlexMili/nextcloud-cli"
+Issues = "https://github.com/AlexMili/nextcloud-cli/issues"
+Source = "https://github.com/AlexMili/nextcloud-cli"
+
+[project.scripts]
+nxcloud = "nextcloud_cli.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nextcloud_cli"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+strict_optional = true
+warn_unused_ignores = true
