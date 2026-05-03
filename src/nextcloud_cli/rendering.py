@@ -6,6 +6,7 @@ Every renderer accepts ``json_output``: when True, the function delegates to
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Iterable
 
 from rich.box import ROUNDED, SIMPLE_HEAD
@@ -14,6 +15,20 @@ from rich.table import Table
 from rich.text import Text
 
 from nextcloud_cli.utils import console, emit, format_size
+
+
+def _format_epoch(value: Any) -> str:
+    """Render a Unix epoch (int/str/float) as 'YYYY-MM-DD HH:MM' local time."""
+    if value in (None, "", 0):
+        return ""
+    try:
+        ts = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    try:
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+    except (OverflowError, OSError, ValueError):
+        return str(value)
 
 
 def _truncate(value: str, limit: int = 60) -> str:
@@ -73,7 +88,7 @@ def render_notes_list(items: list[dict], json_output: bool) -> None:
             str(n.get("id", "")),
             _truncate(n.get("title") or "(untitled)", 50),
             n.get("category") or "—",
-            str(n.get("modified") or ""),
+            _format_epoch(n.get("modified")),
         )
     console.print(table)
     console.print(f"[dim]{len(items)} note(s)[/dim]")

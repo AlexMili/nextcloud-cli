@@ -112,11 +112,20 @@ nxcloud files search --query report --path /Documents
 
 ```bash
 nxcloud notes list
+nxcloud notes list --category Work              # notes in the "Work" folder
+nxcloud notes list --category "Work/Projects"   # nested folder (subdirectory)
+nxcloud notes list --category=""                # only notes at the Notes/ root (no category)
+nxcloud notes list --limit 10                   # cap the number of notes fetched
 nxcloud notes get --id 941
 nxcloud notes create --title "Meeting" --content "Q3 roadmap." --category Work
 nxcloud notes edit --id 941 --title "Updated"
 nxcloud notes delete --id 941
 ```
+
+> In the Nextcloud Notes app, **category = folder**: notes are stored as
+> Markdown files under `Notes/<category>/`, and `/` separates subdirectories.
+> `--category` matches **exactly** — `--category Work` does not include
+> `Work/Projects`. Use `--category=""` to list only notes at the root.
 
 ### Calendar
 
@@ -126,6 +135,19 @@ List calendars and events:
 nxcloud calendar list
 nxcloud calendar events --calendar Personal --start 2026-05-01 --end 2026-05-31
 ```
+
+Date-range shortcuts (server-side filtering, in your configured timezone):
+
+```bash
+nxcloud calendar events --calendar Personal --today
+nxcloud calendar events --calendar Personal --this-week     # current Mon → Mon
+nxcloud calendar events --calendar Personal --next-week     # upcoming Mon → Mon
+nxcloud calendar events --calendar Personal --this-month    # 1st → 1st of next month
+nxcloud calendar events --calendar Personal --next-month
+nxcloud calendar events --calendar Personal --next 7d       # also: 48h, 2w
+```
+
+> Shortcuts are mutually exclusive with each other and with `--start/--end`.
 
 Create an event with attendees and an organizer:
 

@@ -137,7 +137,8 @@ def mkdir(path: str, json_output: bool) -> None:
 @files.command()
 @click.option("--query", required=True, help="Substring to search for in filenames.")
 @click.option("--path", default="/", help="Root path to search under.")
-def search(query: str, path: str, json_output: bool) -> None:
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Stop after N matches.")
+def search(query: str, path: str, limit: int | None, json_output: bool) -> None:
     """Recursive substring search by filename."""
     cfg = load()
     client = webdav_client(cfg)
@@ -145,8 +146,12 @@ def search(query: str, path: str, json_output: bool) -> None:
     needle = query.lower()
 
     def walk(current: str) -> None:
+        if limit is not None and len(matches) >= limit:
+            return
         try:
             for entry in client.ls(current, detail=True):
+                if limit is not None and len(matches) >= limit:
+                    return
                 name = entry["name"]
                 base = Path(name).name or name
                 if needle in base.lower():

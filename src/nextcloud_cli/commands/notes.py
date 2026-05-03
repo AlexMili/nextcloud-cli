@@ -30,14 +30,22 @@ def _handle(response: httpx.Response) -> dict | list:
 @json_option
 @notes.command("list")
 @click.option("--category", default=None, help="Filter by category.")
-def list_(category: str | None, json_output: bool) -> None:
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Max number of notes to fetch.")
+def list_(category: str | None, limit: int | None, json_output: bool) -> None:
     """List all notes."""
     cfg = load()
+    params: dict[str, str | int] = {}
+    if category is not None:
+        params["category"] = category
+    if limit is not None:
+        params["chunkSize"] = limit
     with spinner("Fetching notes", json_output):
         with http_client(cfg) as http:
-            params = {"category": category} if category else None
-            data = _handle(http.get(cfg.notes_api_url, params=params))
-    render_notes_list(data if isinstance(data, list) else [data], json_output)
+            data = _handle(http.get(cfg.notes_api_url, params=params or None))
+    notes_list = data if isinstance(data, list) else [data]
+    if limit is not None:
+        notes_list = notes_list[:limit]
+    render_notes_list(notes_list, json_output)
 
 
 @verbose_option

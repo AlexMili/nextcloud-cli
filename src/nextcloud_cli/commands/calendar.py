@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import click
 from icalendar import Calendar as ICal
@@ -70,20 +72,108 @@ def list_calendars(json_output: bool) -> None:
     render_calendars(cals, json_output)
 
 
+def _shortcut_range(
+    today: bool,
+    this_week: bool,
+    next_week: bool,
+    this_month: bool,
+    next_month: bool,
+    nxt: str | None,
+    tz: str,
+) -> tuple[datetime, datetime] | None:
+    """Resolve a date-range shortcut to (start, end) in the configured timezone.
+
+    Returns None if no shortcut was selected. Raises via ``fail`` on conflicts
+    or malformed values.
+    """
+    chosen = [
+        name
+        for name, on in (
+            ("--today", today),
+            ("--this-week", this_week),
+            ("--next-week", next_week),
+            ("--this-month", this_month),
+            ("--next-month", next_month),
+            ("--next", bool(nxt)),
+        )
+        if on
+    ]
+    if len(chosen) > 1:
+        fail(f"shortcuts are mutually exclusive: {', '.join(chosen)}")
+    if not chosen:
+        return None
+
+    try:
+        zone = ZoneInfo(tz)
+    except Exception:
+        zone = ZoneInfo("UTC")
+    now = datetime.now(zone)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def _first_of_next_month(d: datetime) -> datetime:
+        return (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+    if today:
+        return midnight, midnight + timedelta(days=1)
+    if this_week:
+        monday = midnight - timedelta(days=midnight.weekday())
+        return monday, monday + timedelta(days=7)
+    if next_week:
+        next_monday = midnight - timedelta(days=midnight.weekday()) + timedelta(days=7)
+        return next_monday, next_monday + timedelta(days=7)
+    if this_month:
+        first = midnight.replace(day=1)
+        return first, _first_of_next_month(first)
+    if next_month:
+        first_next = _first_of_next_month(midnight.replace(day=1))
+        return first_next, _first_of_next_month(first_next)
+    # --next Xd / Xh / Xw
+    match = re.fullmatch(r"\s*(\d+)\s*([dhw])\s*", nxt or "", re.IGNORECASE)
+    if not match:
+        fail("--next expects a value like '7d', '48h' or '2w'")
+    n, unit = int(match.group(1)), match.group(2).lower()
+    delta = {"d": timedelta(days=n), "h": timedelta(hours=n), "w": timedelta(weeks=n)}[unit]
+    return now, now + delta
+
+
 @verbose_option
 @json_option
 @calendar.command()
 @click.option("--calendar", "calendar_name", required=True)
 @click.option("--start", default=None, help="ISO 8601 start of range.")
 @click.option("--end", default=None, help="ISO 8601 end of range.")
-def events(calendar_name: str, start: str | None, end: str | None, json_output: bool) -> None:
+@click.option("--today", is_flag=True, help="Events from today (00:00 → 24:00, local TZ).")
+@click.option("--this-week", is_flag=True, help="Events from this week (Monday → Monday).")
+@click.option("--next-week", is_flag=True, help="Events from next week (upcoming Monday → Monday after).")
+@click.option("--this-month", is_flag=True, help="Events from the current calendar month.")
+@click.option("--next-month", is_flag=True, help="Events from the next calendar month.")
+@click.option("--next", "next_", default=None, metavar="Xd|Xh|Xw", help="Events from now to now + duration (e.g. 7d, 48h, 2w).")
+def events(
+    calendar_name: str,
+    start: str | None,
+    end: str | None,
+    today: bool,
+    this_week: bool,
+    next_week: bool,
+    this_month: bool,
+    next_month: bool,
+    next_: str | None,
+    json_output: bool,
+) -> None:
     """List events in a calendar, optionally within a date range."""
     cfg = load()
+    shortcut = _shortcut_range(today, this_week, next_week, this_month, next_month, next_, cfg.timezone)
+    if shortcut and (start or end):
+        fail("--start/--end cannot be combined with shortcut flags (--today, --this-week, --next-week, --this-month, --next-month, --next)")
+
     out: list[dict] = []
     with spinner(f"Fetching events from {calendar_name}", json_output):
         with caldav_principal(cfg) as principal:
             cal = _find_calendar(principal, calendar_name)
-            if start or end:
+            if shortcut:
+                start_dt, end_dt = shortcut
+                results = cal.search(start=start_dt, end=end_dt, event=True, expand=True)
+            elif start or end:
                 start_dt = parse_datetime(start, cfg.timezone) if start else None
                 end_dt = parse_datetime(end, cfg.timezone) if end else None
                 results = cal.search(start=start_dt, end=end_dt, event=True, expand=True)
