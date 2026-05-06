@@ -183,32 +183,110 @@ def events(
             for event in results:
                 ical = ICal.from_ical(event.data)
                 for component in ical.walk("VEVENT"):
-                    attendees = []
-                    raw = component.get("ATTENDEE")
-                    raw_list = raw if isinstance(raw, list) else [raw] if raw else []
-                    for prop in raw_list:
-                        if prop is None:
+                    out.append(_vevent_to_dict(component))
+    render_events(out, json_output)
+
+
+def _vevent_to_dict(component) -> dict:
+    attendees = []
+    raw = component.get("ATTENDEE")
+    raw_list = raw if isinstance(raw, list) else [raw] if raw else []
+    for prop in raw_list:
+        if prop is None:
+            continue
+        email = str(prop).replace("mailto:", "", 1)
+        attendees.append(
+            {
+                "email": email,
+                "cn": str(prop.params.get("CN", "")),
+                "partstat": str(prop.params.get("PARTSTAT", "")),
+            }
+        )
+    return {
+        "uid": str(component.get("UID")),
+        "summary": str(component.get("SUMMARY", "")),
+        "start": component.decoded("DTSTART").isoformat() if component.get("DTSTART") else None,
+        "end": component.decoded("DTEND").isoformat() if component.get("DTEND") else None,
+        "location": str(component.get("LOCATION", "")),
+        "description": str(component.get("DESCRIPTION", "")),
+        "organizer": str(component.get("ORGANIZER", "")).replace("mailto:", "", 1) or None,
+        "attendees": attendees,
+    }
+
+
+_EVENT_SEARCH_FIELDS = {
+    "summary": ("summary",),
+    "description": ("description",),
+    "location": ("location",),
+    "category": ("category",),
+    "all": ("summary", "description", "location"),
+}
+
+
+@verbose_option
+@json_option
+@calendar.command()
+@click.option("--calendar", "calendar_name", required=True)
+@click.option("--query", required=True, help="Substring to match (case-insensitive, server-side).")
+@click.option(
+    "--in",
+    "field",
+    type=click.Choice(list(_EVENT_SEARCH_FIELDS.keys())),
+    default="summary",
+    help="Which iCalendar property to search (default: summary).",
+)
+@click.option("--start", default=None, help="ISO 8601 start of range.")
+@click.option("--end", default=None, help="ISO 8601 end of range.")
+@click.option("--today", is_flag=True)
+@click.option("--this-week", is_flag=True)
+@click.option("--next-week", is_flag=True)
+@click.option("--this-month", is_flag=True)
+@click.option("--next-month", is_flag=True)
+@click.option("--next", "next_", default=None, metavar="Xd|Xh|Xw")
+def search(
+    calendar_name: str,
+    query: str,
+    field: str,
+    start: str | None,
+    end: str | None,
+    today: bool,
+    this_week: bool,
+    next_week: bool,
+    this_month: bool,
+    next_month: bool,
+    next_: str | None,
+    json_output: bool,
+) -> None:
+    """Server-side text search over events (CalDAV text-match)."""
+    cfg = load()
+    shortcut = _shortcut_range(today, this_week, next_week, this_month, next_month, next_, cfg.timezone)
+    if shortcut and (start or end):
+        fail("--start/--end cannot be combined with shortcut flags")
+
+    if shortcut:
+        start_dt, end_dt = shortcut
+    else:
+        start_dt = parse_datetime(start, cfg.timezone) if start else None
+        end_dt = parse_datetime(end, cfg.timezone) if end else None
+
+    fields = _EVENT_SEARCH_FIELDS[field]
+    seen: set[str] = set()
+    out: list[dict] = []
+    with spinner(f"Searching '{query}' in {calendar_name}", json_output):
+        with caldav_principal(cfg) as principal:
+            cal = _find_calendar(principal, calendar_name)
+            for f in fields:
+                kwargs = {f: query, "event": True}
+                if start_dt or end_dt:
+                    kwargs.update(start=start_dt, end=end_dt, expand=True)
+                for ev in cal.search(**kwargs):
+                    ical = ICal.from_ical(ev.data)
+                    for component in ical.walk("VEVENT"):
+                        uid = str(component.get("UID"))
+                        if uid in seen:
                             continue
-                        email = str(prop).replace("mailto:", "", 1)
-                        attendees.append(
-                            {
-                                "email": email,
-                                "cn": str(prop.params.get("CN", "")),
-                                "partstat": str(prop.params.get("PARTSTAT", "")),
-                            }
-                        )
-                    out.append(
-                        {
-                            "uid": str(component.get("UID")),
-                            "summary": str(component.get("SUMMARY", "")),
-                            "start": component.decoded("DTSTART").isoformat() if component.get("DTSTART") else None,
-                            "end": component.decoded("DTEND").isoformat() if component.get("DTEND") else None,
-                            "location": str(component.get("LOCATION", "")),
-                            "description": str(component.get("DESCRIPTION", "")),
-                            "organizer": str(component.get("ORGANIZER", "")).replace("mailto:", "", 1) or None,
-                            "attendees": attendees,
-                        }
-                    )
+                        seen.add(uid)
+                        out.append(_vevent_to_dict(component))
     render_events(out, json_output)
 
 

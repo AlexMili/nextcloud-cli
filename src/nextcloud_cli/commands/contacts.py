@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from xml.etree import ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
 
 import click
 import vobject
@@ -85,6 +86,79 @@ def list_addressbooks(json_output: bool) -> None:
         if display:
             books.append({"name": Path(href.rstrip("/")).name, "displayname": display, "href": href})
     render_addressbooks(books, json_output)
+
+
+_PROP_FIELDS = {
+    "name": ("FN",),
+    "email": ("EMAIL",),
+    "phone": ("TEL",),
+    "all": ("FN", "EMAIL", "TEL"),
+}
+
+
+def _build_search_report(query: str, fields: tuple[str, ...]) -> str:
+    """Build a CardDAV addressbook-query REPORT body with text-match filters."""
+    safe = xml_escape(query)
+    filters = "\n".join(
+        f'    <card:prop-filter name="{f}">'
+        f'      <card:text-match collation="i;unicode-casemap" match-type="contains">{safe}</card:text-match>'
+        f'    </card:prop-filter>'
+        for f in fields
+    )
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:prop>
+    <d:getetag/>
+    <card:address-data/>
+  </d:prop>
+  <card:filter test="anyof">
+{filters}
+  </card:filter>
+</card:addressbook-query>"""
+
+
+@verbose_option
+@json_option
+@contacts.command()
+@click.option("--addressbook", required=True)
+@click.option("--query", required=True, help="Substring to match (case-insensitive).")
+@click.option(
+    "--in",
+    "field",
+    type=click.Choice(list(_PROP_FIELDS.keys())),
+    default="all",
+    help="Which vCard property to search (default: all).",
+)
+def search(addressbook: str, query: str, field: str, json_output: bool) -> None:
+    """Server-side search across contacts in an address book (CardDAV text-match)."""
+    cfg = load()
+    body = _build_search_report(query, _PROP_FIELDS[field])
+    with spinner(f"Searching '{query}' in {addressbook}", json_output):
+        with http_client(cfg, accept="application/xml") as http:
+            response = http.request(
+                "REPORT",
+                _abook_url(cfg, addressbook),
+                content=body,
+                headers={"Depth": "1", "Content-Type": "application/xml"},
+            )
+    if response.status_code >= 400:
+        fail(f"REPORT failed: {response.status_code}: {response.text}")
+
+    root = ET.fromstring(response.text)
+    out = []
+    for resp in root.findall("d:response", CARDDAV_NS):
+        href = resp.findtext("d:href", "", CARDDAV_NS)
+        data = resp.findtext(".//card:address-data", "", CARDDAV_NS)
+        if not data:
+            continue
+        try:
+            card = vobject.readOne(data)
+        except Exception:
+            continue
+        item = _vcard_to_dict(card)
+        item["href"] = href
+        out.append(item)
+    render_contacts(out, json_output)
 
 
 @verbose_option

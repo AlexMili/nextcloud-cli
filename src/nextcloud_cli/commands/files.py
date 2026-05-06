@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 from webdav4.client import ResourceAlreadyExists, ResourceNotFound
 
-from nextcloud_cli.client import webdav_client
+from nextcloud_cli.client import http_client, webdav_client
 from nextcloud_cli.config import load
 from nextcloud_cli.rendering import render_files_list, render_status
 from nextcloud_cli.utils import (
@@ -135,41 +135,32 @@ def mkdir(path: str, json_output: bool) -> None:
 @verbose_option
 @json_option
 @files.command()
-@click.option("--query", required=True, help="Substring to search for in filenames.")
-@click.option("--path", default="/", help="Root path to search under.")
-@click.option("--limit", default=None, type=click.IntRange(min=1), help="Stop after N matches.")
-def search(query: str, path: str, limit: int | None, json_output: bool) -> None:
-    """Recursive substring search by filename."""
+@click.option("--query", required=True, help="Substring to match (server-side, OCS unified search).")
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Max number of matches.")
+def search(query: str, limit: int | None, json_output: bool) -> None:
+    """Server-side filename search via the OCS unified search API."""
     cfg = load()
-    client = webdav_client(cfg)
-    matches: list[dict] = []
-    needle = query.lower()
-
-    def walk(current: str) -> None:
-        if limit is not None and len(matches) >= limit:
-            return
-        try:
-            for entry in client.ls(current, detail=True):
-                if limit is not None and len(matches) >= limit:
-                    return
-                name = entry["name"]
-                base = Path(name).name or name
-                if needle in base.lower():
-                    matches.append(
-                        {
-                            "name": base,
-                            "path": name,
-                            "type": entry["type"],
-                            "size": entry.get("content_length") or 0,
-                            "size_human": format_size(entry.get("content_length") or 0),
-                            "modified": str(entry.get("modified")) if entry.get("modified") else None,
-                        }
-                    )
-                if entry["type"] == "directory" and name.rstrip("/") != current.rstrip("/"):
-                    walk(name)
-        except ResourceNotFound:
-            pass
-
-    with spinner(f"Searching for '{query}' under {path}", json_output):
-        walk(path)
-    render_files_list(matches, f"matches for '{query}' under {path}", json_output)
+    url = f"{cfg.url.rstrip('/')}/ocs/v2.php/search/providers/files/search"
+    params: dict[str, str | int] = {"term": query}
+    if limit is not None:
+        params["limit"] = limit
+    with spinner(f"Searching for '{query}'", json_output):
+        with http_client(cfg) as http:
+            response = http.get(url, params=params)
+    if response.status_code >= 400:
+        fail(f"search failed: {response.status_code}: {response.text}")
+    payload = response.json().get("ocs", {}).get("data", {})
+    entries = payload.get("entries", []) or []
+    matches = [
+        {
+            "name": entry.get("title"),
+            "path": entry.get("attributes", {}).get("path") or entry.get("subline") or "",
+            "resourceUrl": entry.get("resourceUrl"),
+            "fileId": entry.get("attributes", {}).get("fileId"),
+            "icon": entry.get("icon"),
+        }
+        for entry in entries
+    ]
+    if limit is not None:
+        matches = matches[:limit]
+    render_files_list(matches, f"matches for '{query}'", json_output)

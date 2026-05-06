@@ -47,6 +47,17 @@ def _find_task_list(principal, name: str | None):
     return candidates[0]
 
 
+def _vtodo_to_dict(component, list_name: str) -> dict:
+    return {
+        "uid": str(component.get("UID")),
+        "summary": str(component.get("SUMMARY", "")),
+        "due": component.decoded("DUE").isoformat() if component.get("DUE") else None,
+        "status": str(component.get("STATUS", "")),
+        "priority": int(component.get("PRIORITY", 0)) or None,
+        "list": list_name,
+    }
+
+
 @verbose_option
 @json_option
 @tasks.command("list")
@@ -62,16 +73,50 @@ def list_(list_name: str | None, include_completed: bool, json_output: bool) -> 
             for todo in cal.todos(include_completed=include_completed):
                 ical = ICal.from_ical(todo.data)
                 for component in ical.walk("VTODO"):
-                    out.append(
-                        {
-                            "uid": str(component.get("UID")),
-                            "summary": str(component.get("SUMMARY", "")),
-                            "due": component.decoded("DUE").isoformat() if component.get("DUE") else None,
-                            "status": str(component.get("STATUS", "")),
-                            "priority": int(component.get("PRIORITY", 0)) or None,
-                            "list": cal.name,
-                        }
-                    )
+                    out.append(_vtodo_to_dict(component, cal.name))
+    render_tasks(out, json_output)
+
+
+_TASK_SEARCH_FIELDS = {
+    "summary": ("summary",),
+    "description": ("description",),
+    "category": ("category",),
+    "all": ("summary", "description"),
+}
+
+
+@verbose_option
+@json_option
+@tasks.command()
+@click.option("--list", "list_name", default=None, help="Specific task list name.")
+@click.option("--query", required=True, help="Substring to match (case-insensitive, server-side).")
+@click.option(
+    "--in",
+    "field",
+    type=click.Choice(list(_TASK_SEARCH_FIELDS.keys())),
+    default="summary",
+    help="Which iCalendar property to search (default: summary).",
+)
+@click.option("--include-completed", is_flag=True)
+def search(list_name: str | None, query: str, field: str, include_completed: bool, json_output: bool) -> None:
+    """Server-side text search over tasks (CalDAV text-match)."""
+    cfg = load()
+    fields = _TASK_SEARCH_FIELDS[field]
+    seen: set[str] = set()
+    out: list[dict] = []
+    with spinner(f"Searching '{query}' in tasks", json_output):
+        with caldav_principal(cfg) as principal:
+            cal = _find_task_list(principal, list_name)
+            for f in fields:
+                kwargs = {f: query, "todo": True, "include_completed": include_completed}
+                for todo in cal.search(**kwargs):
+                    ical = ICal.from_ical(todo.data)
+                    for component in ical.walk("VTODO"):
+                        uid = str(component.get("UID"))
+                        if uid in seen:
+                            continue
+                        seen.add(uid)
+                        out.append(_vtodo_to_dict(component, cal.name))
     render_tasks(out, json_output)
 
 

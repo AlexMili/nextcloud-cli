@@ -105,7 +105,7 @@ nxcloud files download --remote /Documents/report.pdf --local ./report.pdf
 nxcloud files move --src /tmp/a.txt --dst /archive/a.txt
 nxcloud files mkdir --path /new-folder
 nxcloud files delete --path /old.txt
-nxcloud files search --query report --path /Documents
+nxcloud files search --query report --limit 20    # OCS unified search (server-side)
 ```
 
 ### Notes (requires the Nextcloud Notes app)
@@ -182,6 +182,15 @@ Delete an event:
 nxcloud calendar delete --calendar Work --uid <uid>
 ```
 
+Search events server-side (CalDAV `text-match`). Combine with date filters:
+
+```bash
+nxcloud calendar search --calendar Work --query standup
+nxcloud calendar search --calendar Work --query roadmap --in description
+nxcloud calendar search --calendar Work --query "1:1" --this-week
+# --in: summary | description | location | category | all  (default: summary)
+```
+
 ### Tasks (VTODO)
 
 ```bash
@@ -191,6 +200,9 @@ nxcloud tasks create --summary "Review PR" --due 2026-07-05 --priority 1
 nxcloud tasks complete --uid <uid>
 nxcloud tasks edit --uid <uid> --summary "Updated summary"
 nxcloud tasks delete --uid <uid>
+nxcloud tasks search --query "deploy" --include-completed
+nxcloud tasks search --query "fix" --in description --list Work
+# --in: summary | description | category | all  (default: summary)
 ```
 
 ### Contacts
@@ -200,6 +212,9 @@ nxcloud contacts list
 nxcloud contacts cards --addressbook contacts
 nxcloud contacts get --addressbook contacts --uid <uid>
 nxcloud contacts export --addressbook contacts --uid <uid> --local ./alice.vcf
+nxcloud contacts search --addressbook contacts --query alex
+nxcloud contacts search --addressbook contacts --query "@example.com" --in email
+# --in: name | email | phone | all  (default: all)
 ```
 
 ## Configuration files
