@@ -14,7 +14,6 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import click
 import keyring
@@ -89,7 +88,7 @@ def save(url: str, username: str, password: str, timezone: str = "UTC") -> None:
         _write_secure(SECRETS_FALLBACK_FILE, {account: password})
 
 
-def _load_password(username: str, url: str) -> Optional[str]:
+def _load_password(username: str, url: str) -> str | None:
     account = f"{username}@{url}"
     try:
         pwd = keyring.get_password(KEYRING_SERVICE, account)

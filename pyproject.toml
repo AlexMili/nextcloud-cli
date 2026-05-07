@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Modern command-line client for Nextcloud (files, notes, calendar, tasks, contacts)"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license-files = ["LICENSE"]
 authors = [{ name = "AlexMili" }]
 keywords = ["nextcloud", "webdav", "caldav", "carddav", "cli"]
 classifiers = [
@@ -59,13 +59,13 @@ packages = ["src/nextcloud_cli"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 strict_optional = true
 warn_unused_ignores = true

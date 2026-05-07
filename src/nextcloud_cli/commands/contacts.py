@@ -47,7 +47,7 @@ def _abook_url(cfg: Config, name: str) -> str:
     return f"{cfg.carddav_principal.rstrip('/')}/{name}/"
 
 
-def _vcard_to_dict(card: "vobject.base.Component") -> dict:
+def _vcard_to_dict(card: vobject.base.Component) -> dict:
     fn = getattr(card, "fn", None)
     emails = [e.value for e in card.contents.get("email", [])]
     tels = [t.value for t in card.contents.get("tel", [])]

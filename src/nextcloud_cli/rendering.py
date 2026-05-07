@@ -7,14 +7,14 @@ Every renderer accepts ``json_output``: when True, the function delegates to
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 
 from rich.box import ROUNDED, SIMPLE_HEAD
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from nextcloud_cli.utils import console, emit, format_size
+from nextcloud_cli.utils import console, emit
 
 
 def _format_epoch(value: Any) -> str:
@@ -221,7 +221,7 @@ def render_contact(card: dict, json_output: bool) -> None:
         body.append(f"  • {p}\n", style="yellow")
     if not card.get("phones"):
         body.append("  —\n", style="dim")
-    body.append(f"\nUID: ", style="dim")
+    body.append("\nUID: ", style="dim")
     body.append(card.get("uid") or "—", style="dim")
     console.print(Panel(body, border_style="cyan", box=ROUNDED, expand=False))
 

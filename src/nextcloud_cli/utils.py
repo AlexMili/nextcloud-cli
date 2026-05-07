@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
-from datetime import datetime, timezone
-from typing import Any, Iterator
+from datetime import UTC, datetime
+from typing import Any, NoReturn
 
 import click
 from dateutil import parser as date_parser
@@ -87,7 +88,7 @@ def parse_datetime(value: str, default_tz: str = "UTC") -> datetime:
 
             dt = dt.replace(tzinfo=ZoneInfo(default_tz))
         except Exception:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -120,7 +121,7 @@ def emit(payload: Any) -> None:
     sys.stdout.write("\n")
 
 
-def fail(message: str, code: int = 1) -> "NoReturn":  # type: ignore[name-defined]
+def fail(message: str, code: int = 1) -> NoReturn:
     if err_console.is_terminal:
         err_console.print(f"[bold red]error:[/bold red] {message}")
     else:
